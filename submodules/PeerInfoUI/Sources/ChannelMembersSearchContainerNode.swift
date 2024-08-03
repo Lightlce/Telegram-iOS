@@ -43,7 +43,6 @@ private enum ChannelMembersSearchSection {
     case contacts
     case bots
     case admins
-    case global
     
     var chatListHeaderType: ChatListSearchItemHeaderType? {
         switch self {
@@ -59,8 +58,6 @@ private enum ChannelMembersSearchSection {
                 return .bots
             case .admins:
                 return .admins
-            case .global:
-                return .globalPeers
         }
     }
 }
@@ -666,7 +663,6 @@ public final class ChannelMembersSearchContainerNode: SearchDisplayControllerCon
                 }
                 
                 let foundContacts: Signal<([EnginePeer], [EnginePeer.Id: EnginePeer.Presence]), NoError>
-                let foundRemotePeers: Signal<([FoundPeer], [FoundPeer]), NoError>
                 switch mode {
                     case .inviteActions, .banAndPromoteActions:
                         if filters.contains(where: { filter in
@@ -677,19 +673,15 @@ public final class ChannelMembersSearchContainerNode: SearchDisplayControllerCon
                             }
                         }) {
                             foundContacts = .single(([], [:]))
-                            foundRemotePeers = .single(([], []))
                         } else {
                             foundContacts = context.engine.contacts.searchContacts(query: query.lowercased())
-                            foundRemotePeers = .single(([], [])) |> then(context.engine.contacts.searchRemotePeers(query: query)
-                            |> delay(0.2, queue: Queue.concurrentDefaultQueue()))
                         }
                     case .searchMembers, .searchBanned, .searchKicked, .searchAdmins:
                         foundContacts = .single(([], [:]))
-                        foundRemotePeers = .single(([], []))
                 }
                 
-                return combineLatest(foundGroupMembers, foundMembers, foundContacts, foundRemotePeers, presentationDataPromise.get(), statePromise.get())
-                |> map { foundGroupMembers, foundMembers, foundContacts, foundRemotePeers, presentationData, state -> [ChannelMembersSearchEntry]? in
+                return combineLatest(foundGroupMembers, foundMembers, foundContacts, presentationDataPromise.get(), statePromise.get())
+                |> map { foundGroupMembers, foundMembers, foundContacts, presentationData, state -> [ChannelMembersSearchEntry]? in
                     var entries: [ChannelMembersSearchEntry] = []
                     
                     var existingPeerIds = Set<EnginePeer.Id>()
@@ -904,40 +896,12 @@ public final class ChannelMembersSearchContainerNode: SearchDisplayControllerCon
                         }
                     }
                     
-                    for foundPeer in foundRemotePeers.0 {
-                        let peer = foundPeer.peer
-                        
-                        if excludeBots, let user = peer as? TelegramUser, user.botInfo != nil {
-                            continue
-                        }
-                        
-                        if !existingPeerIds.contains(peer.id) && peer is TelegramUser {
-                            existingPeerIds.insert(peer.id)
-                            entries.append(ChannelMembersSearchEntry(index: index, content: .peer(EnginePeer(peer)), section: .global, dateTimeFormat: presentationData.dateTimeFormat))
-                            index += 1
-                        }
-                    }
-                    
-                    for foundPeer in foundRemotePeers.1 {
-                        let peer = foundPeer.peer
-                        if excludeBots, let user = peer as? TelegramUser, user.botInfo != nil {
-                            continue
-                        }
-                        
-                        if !existingPeerIds.contains(peer.id) && peer is TelegramUser {
-                            existingPeerIds.insert(peer.id)
-                            entries.append(ChannelMembersSearchEntry(index: index, content: .peer(EnginePeer(peer)), section: .global, dateTimeFormat: presentationData.dateTimeFormat))
-                            index += 1
-                        }
-                    }
-                    
                     return entries
                 }
             } else if let group = peerView.peers[peerId] as? TelegramGroup, let cachedData = peerView.cachedData as? CachedGroupData {
                 updateActivity(true)
                 let foundGroupMembers: Signal<[RenderedChannelParticipant], NoError>
                 let foundMembers: Signal<[RenderedChannelParticipant], NoError>
-                let foundRemotePeers: Signal<([FoundPeer], [FoundPeer]), NoError>
                 
                 switch mode {
                     case .searchMembers, .banAndPromoteActions:
@@ -997,15 +961,8 @@ public final class ChannelMembersSearchContainerNode: SearchDisplayControllerCon
                         foundMembers = .single([])
                 }
                 
-                if mode == .banAndPromoteActions || mode == .inviteActions {
-                    foundRemotePeers = .single(([], [])) |> then(context.engine.contacts.searchRemotePeers(query: query)
-                        |> delay(0.2, queue: Queue.concurrentDefaultQueue()))
-                } else {
-                    foundRemotePeers = .single(([], []))
-                }
-                
-                return combineLatest(foundGroupMembers, foundMembers, foundRemotePeers, presentationDataPromise.get(), statePromise.get())
-                |> map { foundGroupMembers, foundMembers, foundRemotePeers, presentationData, state -> [ChannelMembersSearchEntry]? in
+                return combineLatest(foundGroupMembers, foundMembers, presentationDataPromise.get(), statePromise.get())
+                |> map { foundGroupMembers, foundMembers, presentationData, state -> [ChannelMembersSearchEntry]? in
                     var entries: [ChannelMembersSearchEntry] = []
                     
                     var existingPeerIds = Set<EnginePeer.Id>()
@@ -1152,34 +1109,6 @@ public final class ChannelMembersSearchContainerNode: SearchDisplayControllerCon
                             }
                             
                             entries.append(ChannelMembersSearchEntry(index: index, content: .participant(participant: participant, label: label, revealActions: [], revealed: false, enabled: enabled), section: section, dateTimeFormat: presentationData.dateTimeFormat, addIcon: addIcon))
-                            index += 1
-                        }
-                    }
-                    
-                    for foundPeer in foundRemotePeers.0 {
-                        let peer = foundPeer.peer
-                        
-                        if excludeBots, let user = peer as? TelegramUser, user.botInfo != nil {
-                            continue
-                        }
-                        
-                        if !existingPeerIds.contains(peer.id) && peer is TelegramUser {
-                            existingPeerIds.insert(peer.id)
-                            entries.append(ChannelMembersSearchEntry(index: index, content: .peer(EnginePeer(peer)), section: .global, dateTimeFormat: presentationData.dateTimeFormat))
-                            index += 1
-                        }
-                    }
-                    
-                    for foundPeer in foundRemotePeers.1 {
-                        let peer = foundPeer.peer
-                        
-                        if excludeBots, let user = peer as? TelegramUser, user.botInfo != nil {
-                            continue
-                        }
-                        
-                        if !existingPeerIds.contains(peer.id) && peer is TelegramUser {
-                            existingPeerIds.insert(peer.id)
-                            entries.append(ChannelMembersSearchEntry(index: index, content: .peer(EnginePeer(peer)), section: .global, dateTimeFormat: presentationData.dateTimeFormat))
                             index += 1
                         }
                     }

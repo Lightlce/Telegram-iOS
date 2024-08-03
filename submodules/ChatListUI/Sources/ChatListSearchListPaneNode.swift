@@ -767,13 +767,6 @@ public enum ChatListSearchEntry: Comparable, Identifiable {
                         enabled = false
                     }
                 }
-                if filter.contains(.onlyGroups) {
-                    if let _ = peer.peer as? TelegramGroup {
-                    } else if let peer = peer.peer as? TelegramChannel, case .group = peer.info {
-                    } else {
-                        enabled = false
-                    }
-                }
                 
                 var suffixString = ""
                 if let subscribers = peer.subscribers, subscribers != 0 {
@@ -1906,29 +1899,6 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                 let _ = previousRecentlySearchedPeersState.swap(nil)
             }
             
-            let foundRemotePeers: Signal<([FoundPeer], [FoundPeer], Bool), NoError>
-            let currentRemotePeersValue: ([FoundPeer], [FoundPeer]) = currentRemotePeers.with { $0 } ?? ([], [])
-            if case .savedMessagesChats = location {
-                foundRemotePeers = .single(([], [], false))
-            } else if let query = query, case .chats = key {
-                foundRemotePeers = (
-                    .single((currentRemotePeersValue.0, currentRemotePeersValue.1, true))
-                    |> then(
-                        globalPeerSearchContext.searchRemotePeers(engine: context.engine, query: query)
-                        |> map { ($0.0, $0.1, false) }
-                    )
-                )
-            } else if let query = query, case .channels = key {
-                foundRemotePeers = (
-                    .single((currentRemotePeersValue.0, currentRemotePeersValue.1, true))
-                    |> then(
-                        globalPeerSearchContext.searchRemotePeers(engine: context.engine, query: query, scope: .channels)
-                        |> map { ($0.0, $0.1, false) }
-                    )
-                )
-            } else {
-                foundRemotePeers = .single(([], [], false))
-            }
             let searchLocations: [SearchMessagesLocation]
             if let options = options {
                 if case let .forum(peerId) = location {
@@ -2132,9 +2102,9 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                 foundThreads = .single([])
             }
             
-            return combineLatest(accountPeer, foundLocalPeers, foundRemotePeers, foundRemoteMessages, presentationDataPromise.get(), searchStatePromise.get(), selectionPromise.get(), resolvedMessage, fixedRecentlySearchedPeers, foundThreads)
-            |> map { accountPeer, foundLocalPeers, foundRemotePeers, foundRemoteMessages, presentationData, searchState, selectionState, resolvedMessage, recentPeers, allAndFoundThreads -> ([ChatListSearchEntry], Bool)? in
-                let isSearching = foundRemotePeers.2 || foundRemoteMessages.1
+            return combineLatest(accountPeer, foundLocalPeers, foundRemoteMessages, presentationDataPromise.get(), searchStatePromise.get(), selectionPromise.get(), resolvedMessage, fixedRecentlySearchedPeers, foundThreads)
+            |> map { accountPeer, foundLocalPeers, foundRemoteMessages, presentationData, searchState, selectionState, resolvedMessage, recentPeers, allAndFoundThreads -> ([ChatListSearchEntry], Bool)? in
+                let isSearching = foundRemoteMessages.1
                 var entries: [ChatListSearchEntry] = []
                 var index = 0
                 
@@ -2149,8 +2119,6 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                 if query != nil {
                     recentPeers = []
                 }
-                
-                let _ = currentRemotePeers.swap((foundRemotePeers.0, foundRemotePeers.1))
                 
                 let filteredPeer: (EnginePeer, EnginePeer) -> Bool = { peer, accountPeer in
                     if let requestPeerType {
@@ -2320,29 +2288,10 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                         }
                     }
                 }
-                for peer in foundRemotePeers.0 {
-                    if !existingPeerIds.contains(peer.peer.id), filteredPeer(EnginePeer(peer.peer), EnginePeer(accountPeer)) {
-                        existingPeerIds.insert(peer.peer.id)
-                        totalNumberOfLocalPeers += 1
-                    }
-                }
-                
-                var totalNumberOfGlobalPeers = 0
-                for peer in foundRemotePeers.1 {
-                    if !existingPeerIds.contains(peer.peer.id), filteredPeer(EnginePeer(peer.peer), EnginePeer(accountPeer)) {
-                        totalNumberOfGlobalPeers += 1
-                    }
-                }
-                
+                                
                 existingPeerIds.removeAll()
                 
                 let localExpandType: ChatListSearchSectionExpandType = .none
-                let globalExpandType: ChatListSearchSectionExpandType
-                if totalNumberOfGlobalPeers > 3 {
-                    globalExpandType = searchState.expandGlobalSearch ? .collapse : .expand
-                } else {
-                    globalExpandType = .none
-                }
                 
                 let lowercasedQuery = finalQuery.lowercased()
                 if lowercasedQuery.count > 1 && (presentationData.strings.DialogList_SavedMessages.lowercased().hasPrefix(lowercasedQuery) || "saved messages".hasPrefix(lowercasedQuery)) {
@@ -2420,36 +2369,9 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                         }
                     }
                 }
-                
-                for peer in foundRemotePeers.0 {
-                    if case .expand = localExpandType, numberOfLocalPeers >= 3 {
-                        break
-                    }
-                    
-                    if !existingPeerIds.contains(peer.peer.id), filteredPeer(EnginePeer(peer.peer), EnginePeer(accountPeer)) {
-                        existingPeerIds.insert(peer.peer.id)
-                        entries.append(.localPeer(EnginePeer(peer.peer), nil, nil, index, presentationData.theme, presentationData.strings, presentationData.nameSortOrder, presentationData.nameDisplayOrder, localExpandType, nil, false))
-                        index += 1
-                        numberOfLocalPeers += 1
-                    }
-                }
 
-                var numberOfGlobalPeers = 0
                 index = 0
                 if let _ = tagMask {
-                } else {
-                    for peer in foundRemotePeers.1 {
-                        if case .expand = globalExpandType, numberOfGlobalPeers >= 3 {
-                            break
-                        }
-                        
-                        if !existingPeerIds.contains(peer.peer.id), filteredPeer(EnginePeer(peer.peer), EnginePeer(accountPeer)) {
-                            existingPeerIds.insert(peer.peer.id)
-                            entries.append(.globalPeer(peer, nil, index, presentationData.theme, presentationData.strings, presentationData.nameSortOrder, presentationData.nameDisplayOrder, globalExpandType, nil, false))
-                            index += 1
-                            numberOfGlobalPeers += 1
-                        }
-                    }
                 }
                 
                 if let message = resolvedMessage {
@@ -2464,39 +2386,6 @@ final class ChatListSearchListPaneNode: ASDisplayNode, ChatListSearchPaneNode {
                     index += 1
                 }
                 
-                var firstHeaderId: Int64?
-                if !foundRemotePeers.2 {
-                    index = 0
-                    var existingMessageIds = Set<MessageId>()
-                    for foundRemoteMessageSet in foundRemoteMessages.0 {
-                        for message in foundRemoteMessageSet.messages {
-                            if existingMessageIds.contains(message.id) {
-                                continue
-                            }
-                            existingMessageIds.insert(message.id)
-                            
-                            if searchState.deletedMessageIds.contains(message.id) {
-                                continue
-                            } else if message.id.namespace == Namespaces.Message.Cloud && searchState.deletedGlobalMessageIds.contains(message.id.id) {
-                                continue
-                            }
-                            let headerId = listMessageDateHeaderId(timestamp: message.timestamp)
-                            if firstHeaderId == nil {
-                                firstHeaderId = headerId
-                            }
-                            var peer = EngineRenderedPeer(message: message)
-                            if let group = message.peers[message.id.peerId] as? TelegramGroup, let migrationReference = group.migrationReference {
-                                if let channelPeer = message.peers[migrationReference.peerId] {
-                                    peer = EngineRenderedPeer(peer: EnginePeer(channelPeer))
-                                }
-                            }
-                            
-                            //TODO:requiresPremiumForMessaging
-                            entries.append(.message(message, peer, foundRemoteMessageSet.readCounters[message.id.peerId], foundRemoteMessageSet.threadsData[message.id]?.info, presentationData, foundRemoteMessageSet.totalCount, selectionState?.contains(message.id), headerId == firstHeaderId, .index(message.index), nil, .generic, false, nil, false))
-                            index += 1
-                        }
-                    }
-                }
                 
                 if case .chats = key, !peersFilter.contains(.excludeRecent), isViablePhoneNumber(finalQuery) {
                     entries.append(.addContact(finalQuery, presentationData.theme, presentationData.strings))
