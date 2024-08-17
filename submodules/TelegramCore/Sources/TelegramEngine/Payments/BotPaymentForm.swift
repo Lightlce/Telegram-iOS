@@ -10,6 +10,8 @@ public enum BotPaymentInvoiceSource {
     case premiumGiveaway(boostPeer: EnginePeer.Id, additionalPeerIds: [EnginePeer.Id], countries: [String], onlyNewSubscribers: Bool, showWinners: Bool, prizeDescription: String?, randomId: Int64, untilDate: Int32, currency: String, amount: Int64, option: PremiumGiftCodeOption)
     case giftCode(users: [PeerId], currency: String, amount: Int64, option: PremiumGiftCodeOption)
     case stars(option: StarsTopUpOption)
+    case starsGift(peerId: EnginePeer.Id, count: Int64, currency: String, amount: Int64)
+    case starsChatSubscription(hash: String)
 }
 
 public struct BotPaymentInvoiceFields: OptionSet {
@@ -307,9 +309,14 @@ func _internal_parseInputInvoice(transaction: Transaction, source: BotPaymentInv
         if let _ = option.storeProductId {
             flags |= (1 << 0)
         }
-        return .inputInvoiceStars(
-            option: .starsTopupOption(flags: flags, stars: option.count, storeProduct: option.storeProductId, currency: option.currency, amount: option.amount)
-        )
+        return .inputInvoiceStars(purpose: .inputStorePaymentStarsTopup(stars: option.count, currency: option.currency, amount: option.amount))
+    case let .starsGift(peerId, count, currency, amount):
+        guard let peer = transaction.getPeer(peerId), let inputUser = apiInputUser(peer) else {
+            return nil
+        }
+        return .inputInvoiceStars(purpose: .inputStorePaymentStarsGift(userId: inputUser, stars: count, currency: currency, amount: amount))
+    case let .starsChatSubscription(hash):
+        return .inputInvoiceChatInviteSubscription(hash: hash)
     }
 }
 
@@ -534,7 +541,7 @@ public enum SendBotPaymentFormError {
 }
 
 public enum SendBotPaymentResult {
-    case done(receiptMessageId: MessageId?)
+    case done(receiptMessageId: MessageId?, subscriptionPeerId: PeerId?)
     case externalVerificationRequired(url: String)
 }
 
@@ -578,6 +585,17 @@ func _internal_sendBotPaymentForm(account: Account, formId: Int64, source: BotPa
                 case let .paymentResult(updates):
                     account.stateManager.addUpdates(updates)
                     var receiptMessageId: MessageId?
+                
+                    switch source {
+                    case .starsChatSubscription:
+                        let chats = updates.chats.compactMap { parseTelegramGroupOrChannel(chat: $0) }
+                        if let first = chats.first {
+                            return .done(receiptMessageId: nil, subscriptionPeerId: first.id)
+                        }
+                    default:
+                        break
+                    }
+                
                     for apiMessage in updates.messages {
                         if let message = StoreMessage(apiMessage: apiMessage, accountPeerId: account.peerId, peerIsForum: false) {
                             for media in message.media {
@@ -608,9 +626,7 @@ func _internal_sendBotPaymentForm(account: Account, formId: Int64, source: BotPa
                                                     receiptMessageId = id
                                                 }
                                             }
-                                        case .giftCode:
-                                            receiptMessageId = nil
-                                        case .stars:
+                                        case .giftCode, .stars, .starsGift, .starsChatSubscription:
                                             receiptMessageId = nil
                                         }
                                     }
@@ -618,7 +634,7 @@ func _internal_sendBotPaymentForm(account: Account, formId: Int64, source: BotPa
                             }
                         }
                     }
-                    return .done(receiptMessageId: receiptMessageId)
+                    return .done(receiptMessageId: receiptMessageId, subscriptionPeerId: nil)
                 case let .paymentVerificationNeeded(url):
                     return .externalVerificationRequired(url: url)
             }

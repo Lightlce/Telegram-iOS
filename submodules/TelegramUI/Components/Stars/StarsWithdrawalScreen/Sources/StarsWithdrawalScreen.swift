@@ -55,7 +55,7 @@ private final class SheetContent: CombinedComponent {
         let background = Child(RoundedRectangle.self)
         let closeButton = Child(Button.self)
         let title = Child(Text.self)
-        let urlSection = Child(ListSectionComponent.self)
+        let amountSection = Child(ListSectionComponent.self)
         let button = Child(ButtonComponent.self)
         let balanceTitle = Child(MultilineTextComponent.self)
         let balanceValue = Child(MultilineTextComponent.self)
@@ -65,6 +65,8 @@ private final class SheetContent: CombinedComponent {
             let environment = context.environment[EnvironmentType.self]
             let component = context.component
             let state = context.state
+            
+            let controller = environment.controller
             
             let theme = environment.theme.withModalBlocksBackground()
             let strings = environment.strings
@@ -229,7 +231,9 @@ private final class SheetContent: CombinedComponent {
                         }
                     },
                     tapAction: { attributes, _ in
-                        component.context.sharedContext.openExternalUrl(context: component.context, urlContext: .generic, url: strings.Stars_PaidContent_AmountInfo_URL, forceExternal: true, presentationData: presentationData, navigationController: nil, dismissInput: {})
+                        if let controller = controller() as? StarsWithdrawScreen, let navigationController = controller.navigationController as? NavigationController {
+                            component.context.sharedContext.openExternalUrl(context: component.context, urlContext: .generic, url: strings.Stars_PaidContent_AmountInfo_URL, forceExternal: false, presentationData: presentationData, navigationController: navigationController, dismissInput: {})
+                        }
                     }
                 ))
             case let .reaction(starsToTop):
@@ -242,7 +246,7 @@ private final class SheetContent: CombinedComponent {
                 amountFooter = nil
             }
                          
-            let urlSection = urlSection.update(
+            let amountSection = amountSection.update(
                 component: ListSectionComponent(
                     theme: theme,
                     header: AnyComponent(MultilineTextComponent(
@@ -279,35 +283,34 @@ private final class SheetContent: CombinedComponent {
                 availableSize: CGSize(width: context.availableSize.width - sideInset * 2.0, height: .greatestFiniteMagnitude),
                 transition: context.transition
             )
-            context.add(urlSection
-                .position(CGPoint(x: context.availableSize.width / 2.0, y: contentSize.height + urlSection.size.height / 2.0))
+            context.add(amountSection
+                .position(CGPoint(x: context.availableSize.width / 2.0, y: contentSize.height + amountSection.size.height / 2.0))
                 .clipsToBounds(true)
                 .cornerRadius(10.0)
             )
-            contentSize.height += urlSection.size.height
+            contentSize.height += amountSection.size.height
             contentSize.height += 32.0
             
             let buttonString: String
             if case .paidMedia = component.mode {
                 buttonString = environment.strings.Stars_PaidContent_Create
             } else if let amount = state.amount {
-                buttonString = "\(environment.strings.Stars_Withdraw_Withdraw)   #  \(amount)"
+                buttonString = "\(environment.strings.Stars_Withdraw_Withdraw)   #  \(presentationStringsFormattedNumber(Int32(amount), environment.dateTimeFormat.groupingSeparator))"
             } else {
                 buttonString = environment.strings.Stars_Withdraw_Withdraw
             }
             
             if state.cachedStarImage == nil || state.cachedStarImage?.1 !== theme {
-                state.cachedStarImage = (generateTintedImage(image: UIImage(bundleImageName: "Item List/PremiumIcon"), color: .white)!, theme)
+                state.cachedStarImage = (generateTintedImage(image: UIImage(bundleImageName: "Item List/PremiumIcon"), color: theme.list.itemCheckColors.foregroundColor)!, theme)
             }
             
-            let buttonAttributedString = NSMutableAttributedString(string: buttonString, font: Font.semibold(17.0), textColor: .white, paragraphAlignment: .center)
+            let buttonAttributedString = NSMutableAttributedString(string: buttonString, font: Font.semibold(17.0), textColor: theme.list.itemCheckColors.foregroundColor, paragraphAlignment: .center)
             if let range = buttonAttributedString.string.range(of: "#"), let starImage = state.cachedStarImage?.0 {
                 buttonAttributedString.addAttribute(.attachment, value: starImage, range: NSRange(range, in: buttonAttributedString.string))
                 buttonAttributedString.addAttribute(.foregroundColor, value: UIColor(rgb: 0xffffff), range: NSRange(range, in: buttonAttributedString.string))
                 buttonAttributedString.addAttribute(.baselineOffset, value: 1.0, range: NSRange(range, in: buttonAttributedString.string))
             }
             
-            let controller = environment.controller
             let button = button.update(
                 component: ButtonComponent(
                     background: ButtonComponent.Background(
